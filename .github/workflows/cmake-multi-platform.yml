@@ -16,39 +16,46 @@ jobs:
           path: td
           ref: master
 
-      - name: Install Chocolatey
+      - name: Clone vcpkg
         run: |
-          Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          cd td
+          git clone https://github.com/Microsoft/vcpkg.git
 
-      - name: Install TDLib dependencies (Windows)
+      - name: Checkout specific vcpkg version
         run: |
-          choco install -y cmake --installargs 'ADD_CMAKE_TO_PATH=System'
-          choco install -y ninja openssl openssl-lite zlib1g-dev icu gperf
-          refreshenv
+          cd td/vcpkg
+          git checkout bc3512a509f9d29b37346a7e7e929f9a26e66c7e
 
-      - name: Set reusable strings
-        id: strings
-        shell: bash
+      - name: Bootstrap vcpkg
         run: |
-          echo "build-output-dir=${{ github.workspace }}/td/build" >> "$GITHUB_OUTPUT"
-          echo "install-dir=${{ github.workspace }}/td/install" >> "$GITHUB_OUTPUT"
+          cd td/vcpkg
+          .\bootstrap-vcpkg.bat
 
-      - name: Configure CMake for TDLib (Windows)
-        run: >
-          cmake -B ${{ steps.strings.outputs.build-output-dir }}
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_INSTALL_PREFIX=${{ steps.strings.outputs.install-dir }}
-          -DBUILD_SHARED_LIBS=ON
-          -S ${{ github.workspace }}/td
+      - name: Install dependencies via vcpkg
+        run: |
+          cd td/vcpkg
+          .\vcpkg.exe install gperf:x64-windows openssl:x64-windows zlib:x64-windows
 
-      - name: Build TDLib
-        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release --target install -j$(nproc)
+      - name: Clean and create build directory
+        run: |
+          cd td
+          Remove-Item build -Force -Recurse -ErrorAction SilentlyContinue
+          mkdir build
+
+      - name: Configure CMake with vcpkg
+        run: |
+          cd td/build
+          cmake -A x64 -DCMAKE_INSTALL_PREFIX:PATH=../tdlib -DCMAKE_TOOLCHAIN_FILE:FILEPATH=../vcpkg/scripts/buildsystems/vcpkg.cmake ..
+
+      - name: Build and install TDLib
+        run: |
+          cd td/build
+          cmake --build . --target install --config Release
 
       - name: Package build artifacts
         run: |
-          cd ${{ github.workspace }}/td
-          tar -czf tdlib-windows-x86_64.tar.gz install/
+          cd td
+          tar -czf tdlib-windows-x86_64.tar.gz tdlib/
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
