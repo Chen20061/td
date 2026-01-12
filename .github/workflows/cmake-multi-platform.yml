@@ -1,0 +1,58 @@
+name: Build TDLib for Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "master" ]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout TDLib source
+        uses: actions/checkout@v4
+        with:
+          repository: tdlib/td
+          path: td
+          ref: master
+
+      - name: Install Chocolatey
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+      - name: Install TDLib dependencies (Windows)
+        run: |
+          choco install -y cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+          choco install -y ninja openssl openssl-lite zlib1g-dev icu gperf
+          refreshenv
+
+      - name: Set reusable strings
+        id: strings
+        shell: bash
+        run: |
+          echo "build-output-dir=${{ github.workspace }}/td/build" >> "$GITHUB_OUTPUT"
+          echo "install-dir=${{ github.workspace }}/td/install" >> "$GITHUB_OUTPUT"
+
+      - name: Configure CMake for TDLib (Windows)
+        run: >
+          cmake -B ${{ steps.strings.outputs.build-output-dir }}
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_PREFIX=${{ steps.strings.outputs.install-dir }}
+          -DBUILD_SHARED_LIBS=ON
+          -S ${{ github.workspace }}/td
+
+      - name: Build TDLib
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release --target install -j$(nproc)
+
+      - name: Package build artifacts
+        run: |
+          cd ${{ github.workspace }}/td
+          tar -czf tdlib-windows-x86_64.tar.gz install/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-windows-x86_64
+          path: td/tdlib-windows-x86_64.tar.gz
+          retention-days: 30
